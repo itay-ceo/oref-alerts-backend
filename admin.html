@@ -231,7 +231,7 @@
         <input type="file" id="fAudio" accept="audio/*">
       </div>
       <div class="modal-actions">
-        <button type="submit" class="btn-save">שמור</button>
+        <button type="button" class="btn-save" onclick="saveSound()">שמור</button>
         <button type="button" class="btn-cancel" onclick="closeModal()">ביטול</button>
       </div>
     </form>
@@ -371,14 +371,17 @@ document.getElementById('overlay').addEventListener('click', e => {
 });
 
 // ─── Save ───────────────────────────────────────────────────────────
-document.getElementById('soundForm').addEventListener('submit', async e => {
-  e.preventDefault();
+async function saveSound() {
+  console.log('save clicked');
   // Cancel any pending loads so the POST isn't blocked
   if (loadController) loadController.abort();
 
   const editId = document.getElementById('editId').value;
+  const title = document.getElementById('fTitle').value.trim();
+  if (!title) { alert('יש להזין שם צליל'); return; }
+
   const fd = new FormData();
-  fd.append('title', document.getElementById('fTitle').value);
+  fd.append('title', title);
   fd.append('category', document.getElementById('fCategory').value);
 
   const imgFile = document.getElementById('fImage').files[0];
@@ -389,11 +392,18 @@ document.getElementById('soundForm').addEventListener('submit', async e => {
   const url = editId ? `${API}/${editId}` : API;
   const method = editId ? 'PUT' : 'POST';
 
+  console.log('Saving to', method, url);
   try {
-    await fetch(url, { method, body: fd });
+    const res = await fetch(url, { method, body: fd });
+    console.log('Save response:', res.status);
     closeModal();
     await loadSounds();
   } catch (err) { console.error('Save failed:', err); }
+}
+
+document.getElementById('soundForm').addEventListener('submit', e => {
+  e.preventDefault();
+  saveSound();
 });
 
 // ─── Init ───────────────────────────────────────────────────────────

@@ -1,4 +1,7 @@
+const path = require('path');
+const fs = require('fs');
 const { Pool } = require('pg');
+const { uploadFile } = require('./cloudinary');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -6,14 +9,14 @@ const pool = new Pool({
 });
 
 const SEED_SOUNDS = [
-  { id: 'biton1', title: 'ביטון 1', category: 'warning', image_path: 'biton1.jpg', audio_path: 'biton1.mp3' },
-  { id: 'biton2', title: 'ביטון 2', category: 'active', image_path: 'biton2.jpg', audio_path: 'biton2.mp3' },
-  { id: 'cant_touch_this', title: "Can't Touch This", category: 'all_clear', image_path: 'cant_touch_this.jpg', audio_path: 'cant_touch_this.mp3' },
-  { id: 'everybody_dance', title: 'Everybody Dance Now', category: 'all_clear', image_path: 'everybody_dance.jpg', audio_path: 'everybody_dance.mp3' },
-  { id: 'hakol_beseder', title: 'הכל יהיה בסדר', category: 'all_clear', image_path: 'hakol_beseder..jpg', audio_path: 'hakol_beseder.mp3' },
-  { id: 'hay', title: 'חי חי חי', category: 'all_clear', image_path: 'hay.jpg', audio_path: 'hay.mp3' },
-  { id: 'ilanit_cut', title: 'הנה ימים באים', category: 'all_clear', image_path: 'ilanit_cut.jpg', audio_path: 'ilanit_cut.mp3' },
-  { id: 'sheket_shalva', title: 'שקט שלווה', category: 'all_clear', image_path: 'sheket_shalva.jpg', audio_path: 'sheket_shalva.mp3' },
+  { id: 'biton1', title: 'ביטון 1', category: 'warning', imageFile: 'biton1.jpg', audioFile: 'biton1.mp3' },
+  { id: 'biton2', title: 'ביטון 2', category: 'active', imageFile: 'biton2.jpg', audioFile: 'biton2.mp3' },
+  { id: 'cant_touch_this', title: "Can't Touch This", category: 'all_clear', imageFile: 'cant_touch_this.jpg', audioFile: 'cant_touch_this.mp3' },
+  { id: 'everybody_dance', title: 'Everybody Dance Now', category: 'all_clear', imageFile: 'everybody_dance.jpg', audioFile: 'everybody_dance.mp3' },
+  { id: 'hakol_beseder', title: 'הכל יהיה בסדר', category: 'all_clear', imageFile: 'hakol_beseder..jpg', audioFile: 'hakol_beseder.mp3' },
+  { id: 'hay', title: 'חי חי חי', category: 'all_clear', imageFile: 'hay.jpg', audioFile: 'hay.mp3' },
+  { id: 'ilanit_cut', title: 'הנה ימים באים', category: 'all_clear', imageFile: 'ilanit_cut.jpg', audioFile: 'ilanit_cut.mp3' },
+  { id: 'sheket_shalva', title: 'שקט שלווה', category: 'all_clear', imageFile: 'sheket_shalva.jpg', audioFile: 'sheket_shalva.mp3' },
 ];
 
 async function init() {
@@ -33,11 +36,28 @@ async function init() {
   // Auto-seed if empty
   const { rows: [{ n }] } = await pool.query('SELECT COUNT(*) AS n FROM sounds');
   if (Number(n) === 0) {
-    console.log('DB: table empty — seeding default sounds...');
+    console.log('DB: table empty — seeding default sounds via Cloudinary...');
+    const uploadsDir = path.join(__dirname, 'uploads');
+
     for (const s of SEED_SOUNDS) {
+      let imageUrl = null;
+      let audioUrl = null;
+
+      const imgPath = path.join(uploadsDir, s.imageFile);
+      const audPath = path.join(uploadsDir, s.audioFile);
+
+      if (fs.existsSync(imgPath)) {
+        imageUrl = await uploadFile(imgPath, 'oref-sounds', 'image');
+        console.log(`  ${s.id} image → ${imageUrl}`);
+      }
+      if (fs.existsSync(audPath)) {
+        audioUrl = await uploadFile(audPath, 'oref-sounds', 'video');
+        console.log(`  ${s.id} audio → ${audioUrl}`);
+      }
+
       await pool.query(
         'INSERT INTO sounds (id, title, category, image_path, audio_path) VALUES ($1, $2, $3, $4, $5)',
-        [s.id, s.title, s.category, s.image_path, s.audio_path]
+        [s.id, s.title, s.category, imageUrl, audioUrl]
       );
     }
     console.log(`DB: seeded ${SEED_SOUNDS.length} sounds`);

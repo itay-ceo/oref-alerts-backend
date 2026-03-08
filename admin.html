@@ -268,12 +268,12 @@ function render() {
   tbody.innerHTML = filtered.map(s => `
     <tr>
       <td>${s.image_path
-        ? `<img class="thumb" src="/uploads/${s.image_path}" alt="">`
+        ? `<img class="thumb" src="${s.image_path}" alt="">`
         : '<div class="thumb"></div>'}</td>
       <td>${esc(s.title)}</td>
       <td><span class="badge badge-${s.category}">${CATEGORY_LABELS[s.category]}</span></td>
       <td>${s.audio_path
-        ? `<span class="audio-preview" onclick="playAudio('/uploads/${s.audio_path}', this)">&#9654;</span>`
+        ? `<span class="audio-preview" onclick="playAudio('${s.audio_path}', this)">&#9654;</span>`
         : '—'}</td>
       <td>
         <button class="toggle ${s.is_active ? 'on' : 'off'}"

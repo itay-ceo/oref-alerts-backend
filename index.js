@@ -2,24 +2,16 @@ const express = require('express');
 const path = require('path');
 const multer = require('multer');
 const { pool, init: initDb } = require('./db');
+const { uploadBuffer } = require('./cloudinary');
 
 const app = express();
 app.use(express.json());
 
-// Serve uploaded files and admin UI
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Serve admin UI
 app.get('/admin', (_req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
 
-// ─── Multer setup for file uploads ──────────────────────────────────
-const storage = multer.diskStorage({
-  destination: path.join(__dirname, 'uploads'),
-  filename: (_req, file, cb) => {
-    const unique = Date.now() + '-' + Math.round(Math.random() * 1e6);
-    const ext = path.extname(file.originalname);
-    cb(null, unique + ext);
-  },
-});
-const upload = multer({ storage });
+// ─── Multer setup (memory storage → Cloudinary) ─────────────────────
+const upload = multer({ storage: multer.memoryStorage() });
 
 const PORT = process.env.PORT || 3001;
 const OREF_URL = 'https://www.oref.org.il/WarningMessages/alert/alerts.json';
@@ -213,12 +205,19 @@ app.post('/admin/sounds', upload.fields([{ name: 'image', maxCount: 1 }, { name:
   if (!title || !category) return res.status(400).json({ error: 'title and category are required' });
 
   const id = req.body.id || `${category}_${Date.now().toString(36)}`;
-  const imagePath = req.files?.image?.[0]?.filename || null;
-  const audioPath = req.files?.audio?.[0]?.filename || null;
+  let imageUrl = null;
+  let audioUrl = null;
+
+  if (req.files?.image?.[0]) {
+    imageUrl = await uploadBuffer(req.files.image[0].buffer, 'oref-sounds', 'image');
+  }
+  if (req.files?.audio?.[0]) {
+    audioUrl = await uploadBuffer(req.files.audio[0].buffer, 'oref-sounds', 'video');
+  }
 
   const { rows } = await pool.query(
     'INSERT INTO sounds (id, title, category, image_path, audio_path) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-    [id, title, category, imagePath, audioPath]
+    [id, title, category, imageUrl, audioUrl]
   );
   console.log(`[admin] Added sound: "${title}" (${category})`);
   res.json(rows[0]);
@@ -239,12 +238,20 @@ app.put('/admin/sounds/:id', maybeUpload, async (req, res) => {
   const title = req.body.title ?? old.title;
   const category = req.body.category ?? old.category;
   const isActive = req.body.is_active !== undefined ? Boolean(Number(req.body.is_active)) : old.is_active;
-  const imagePath = req.files?.image?.[0]?.filename || old.image_path;
-  const audioPath = req.files?.audio?.[0]?.filename || old.audio_path;
+
+  let imageUrl = old.image_path;
+  let audioUrl = old.audio_path;
+
+  if (req.files?.image?.[0]) {
+    imageUrl = await uploadBuffer(req.files.image[0].buffer, 'oref-sounds', 'image');
+  }
+  if (req.files?.audio?.[0]) {
+    audioUrl = await uploadBuffer(req.files.audio[0].buffer, 'oref-sounds', 'video');
+  }
 
   const { rows } = await pool.query(
     'UPDATE sounds SET title = $1, category = $2, image_path = $3, audio_path = $4, is_active = $5 WHERE id = $6 RETURNING *',
-    [title, category, imagePath, audioPath, isActive, id]
+    [title, category, imageUrl, audioUrl, isActive, id]
   );
   console.log(`[admin] Updated sound #${id}: "${title}"`);
   res.json(rows[0]);
@@ -268,12 +275,11 @@ app.get('/sounds/:category', async (req, res) => {
     [category]
   );
 
-  const baseUrl = `${req.protocol}://${req.get('host')}`;
   const sounds = rows.map((r) => ({
     id: r.id,
     name: r.title,
-    image: r.image_path ? `${baseUrl}/uploads/${r.image_path}` : null,
-    audio: r.audio_path ? `${baseUrl}/uploads/${r.audio_path}` : null,
+    image: r.image_path || null,
+    audio: r.audio_path || null,
   }));
   res.json(sounds);
 });

@@ -1,55 +1,56 @@
 const fs = require('fs');
 const path = require('path');
 const { pool, init: initDb } = require('./db');
+const { uploadFile } = require('./cloudinary');
 
-const ASSETS_ROOT = path.join(__dirname, '..', 'assets', 'sounds');
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 
-// All sounds to migrate, matching constants/sounds.ts
+// All sounds to migrate
 const SOUNDS = [
-  { id: 'biton1', title: 'ביטון 1', category: 'warning', imageFile: 'warning/biton1.jpg', audioFile: 'warning/biton1.mp3' },
-  { id: 'biton2', title: 'ביטון 2', category: 'active', imageFile: 'active/biton2.jpg', audioFile: 'active/biton2.mp3' },
-  { id: 'cant_touch_this', title: "Can't Touch This", category: 'all_clear', imageFile: 'all_clear/cant touch this.jpg', audioFile: 'all_clear/cant touch this.mp3' },
-  { id: 'everybody_dance', title: 'Everybody Dance Now', category: 'all_clear', imageFile: 'all_clear/everybody dance.jpg', audioFile: 'all_clear/everybody dance.mp3' },
-  { id: 'hakol_beseder', title: 'הכל יהיה בסדר', category: 'all_clear', imageFile: 'all_clear/hakol beseder..jpg', audioFile: 'all_clear/hakol beseder.mp3' },
-  { id: 'hay', title: 'חי חי חי', category: 'all_clear', imageFile: 'all_clear/hay.jpg', audioFile: 'all_clear/Hay.mp3' },
-  { id: 'ilanit_cut', title: 'הנה ימים באים', category: 'all_clear', imageFile: 'all_clear/ilanit_cut.jpg', audioFile: 'all_clear/ilanit_cut.mp3' },
-  { id: 'sheket_shalva', title: 'שקט שלווה', category: 'all_clear', imageFile: 'all_clear/Sheket Shalva.jpg', audioFile: 'all_clear/Sheket Shalva.mp3' },
+  { id: 'biton1', title: 'ביטון 1', category: 'warning', imageFile: 'biton1.jpg', audioFile: 'biton1.mp3' },
+  { id: 'biton2', title: 'ביטון 2', category: 'active', imageFile: 'biton2.jpg', audioFile: 'biton2.mp3' },
+  { id: 'cant_touch_this', title: "Can't Touch This", category: 'all_clear', imageFile: 'cant_touch_this.jpg', audioFile: 'cant_touch_this.mp3' },
+  { id: 'everybody_dance', title: 'Everybody Dance Now', category: 'all_clear', imageFile: 'everybody_dance.jpg', audioFile: 'everybody_dance.mp3' },
+  { id: 'hakol_beseder', title: 'הכל יהיה בסדר', category: 'all_clear', imageFile: 'hakol_beseder..jpg', audioFile: 'hakol_beseder.mp3' },
+  { id: 'hay', title: 'חי חי חי', category: 'all_clear', imageFile: 'hay.jpg', audioFile: 'hay.mp3' },
+  { id: 'ilanit_cut', title: 'הנה ימים באים', category: 'all_clear', imageFile: 'ilanit_cut.jpg', audioFile: 'ilanit_cut.mp3' },
+  { id: 'sheket_shalva', title: 'שקט שלווה', category: 'all_clear', imageFile: 'sheket_shalva.jpg', audioFile: 'sheket_shalva.mp3' },
 ];
 
-function copyFile(srcRelative) {
-  const src = path.join(ASSETS_ROOT, srcRelative);
-  if (!fs.existsSync(src)) {
-    console.warn(`  SKIP (not found): ${src}`);
-    return null;
-  }
-  const cleanName = path.basename(srcRelative).replace(/\s+/g, '_').toLowerCase();
-  const dest = path.join(UPLOADS_DIR, cleanName);
-  fs.copyFileSync(src, dest);
-  return cleanName;
-}
-
 async function migrate() {
-  console.log('=== Sound Migration ===\n');
+  console.log('=== Sound Migration (Cloudinary) ===\n');
 
   await initDb();
 
-  if (!fs.existsSync(UPLOADS_DIR)) {
-    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-  }
-
   for (const sound of SOUNDS) {
     console.log(`Migrating: ${sound.id} (${sound.category})`);
-    const imagePath = copyFile(sound.imageFile);
-    const audioPath = copyFile(sound.audioFile);
+
+    let imageUrl = null;
+    let audioUrl = null;
+
+    const imgPath = path.join(UPLOADS_DIR, sound.imageFile);
+    const audPath = path.join(UPLOADS_DIR, sound.audioFile);
+
+    if (fs.existsSync(imgPath)) {
+      imageUrl = await uploadFile(imgPath, 'oref-sounds', 'image');
+      console.log(`  image → ${imageUrl}`);
+    } else {
+      console.warn(`  SKIP image (not found): ${imgPath}`);
+    }
+
+    if (fs.existsSync(audPath)) {
+      audioUrl = await uploadFile(audPath, 'oref-sounds', 'video');
+      console.log(`  audio → ${audioUrl}`);
+    } else {
+      console.warn(`  SKIP audio (not found): ${audPath}`);
+    }
 
     await pool.query(
       `INSERT INTO sounds (id, title, category, image_path, audio_path)
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (id) DO UPDATE SET title = $2, category = $3, image_path = $4, audio_path = $5`,
-      [sound.id, sound.title, sound.category, imagePath, audioPath]
+      [sound.id, sound.title, sound.category, imageUrl, audioUrl]
     );
-    console.log(`  → image: ${imagePath || 'NONE'}, audio: ${audioPath || 'NONE'}`);
   }
 
   const { rows: [{ n }] } = await pool.query('SELECT COUNT(*) as n FROM sounds');

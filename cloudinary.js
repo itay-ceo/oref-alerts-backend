@@ -13,11 +13,13 @@ cloudinary.config({
  * @param {'image'|'video'|'raw'|'auto'} resourceType - use 'video' for audio files
  * @returns {Promise<string>} secure URL
  */
-async function uploadBuffer(buffer, folder, resourceType = 'auto') {
+async function uploadBuffer(buffer, folder, resourceType = 'auto', timeoutMs = 60000) {
   return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Cloudinary upload timed out after ${timeoutMs}ms`)), timeoutMs);
     const stream = cloudinary.uploader.upload_stream(
       { folder, resource_type: resourceType },
       (err, result) => {
+        clearTimeout(timer);
         if (err) return reject(err);
         resolve(result.secure_url);
       }

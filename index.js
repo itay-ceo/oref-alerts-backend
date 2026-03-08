@@ -204,26 +204,37 @@ app.get('/admin/sounds', async (req, res) => {
 });
 
 app.post('/admin/sounds', upload.fields([{ name: 'image', maxCount: 1 }, { name: 'audio', maxCount: 1 }]), async (req, res) => {
-  const { title, category } = req.body;
-  if (!title || !category) return res.status(400).json({ error: 'title and category are required' });
+  console.log('[POST /admin/sounds] Start — body:', req.body, 'files:', Object.keys(req.files || {}));
+  try {
+    const { title, category } = req.body;
+    if (!title || !category) return res.status(400).json({ error: 'title and category are required' });
 
-  const id = req.body.id || `${category}_${Date.now().toString(36)}`;
-  let imageUrl = null;
-  let audioUrl = null;
+    const id = req.body.id || `${category}_${Date.now().toString(36)}`;
+    let imageUrl = null;
+    let audioUrl = null;
 
-  if (req.files?.image?.[0]) {
-    imageUrl = await uploadBuffer(req.files.image[0].buffer, 'oref-sounds', 'image');
+    if (req.files?.image?.[0]) {
+      console.log('[POST /admin/sounds] Uploading image to Cloudinary...', req.files.image[0].size, 'bytes');
+      imageUrl = await uploadBuffer(req.files.image[0].buffer, 'oref-sounds', 'image');
+      console.log('[POST /admin/sounds] Image uploaded:', imageUrl);
+    }
+    if (req.files?.audio?.[0]) {
+      console.log('[POST /admin/sounds] Uploading audio to Cloudinary...', req.files.audio[0].size, 'bytes');
+      audioUrl = await uploadBuffer(req.files.audio[0].buffer, 'oref-sounds', 'video');
+      console.log('[POST /admin/sounds] Audio uploaded:', audioUrl);
+    }
+
+    console.log('[POST /admin/sounds] Inserting into DB...');
+    const { rows } = await pool.query(
+      'INSERT INTO sounds (id, title, category, image_path, audio_path) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [id, title, category, imageUrl, audioUrl]
+    );
+    console.log(`[POST /admin/sounds] Done — added "${title}" (${category}) id=${id}`);
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('[POST /admin/sounds] Error:', err);
+    res.status(500).json({ error: err.message });
   }
-  if (req.files?.audio?.[0]) {
-    audioUrl = await uploadBuffer(req.files.audio[0].buffer, 'oref-sounds', 'video');
-  }
-
-  const { rows } = await pool.query(
-    'INSERT INTO sounds (id, title, category, image_path, audio_path) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-    [id, title, category, imageUrl, audioUrl]
-  );
-  console.log(`[admin] Added sound: "${title}" (${category})`);
-  res.json(rows[0]);
 });
 
 const uploadFields = upload.fields([{ name: 'image', maxCount: 1 }, { name: 'audio', maxCount: 1 }]);

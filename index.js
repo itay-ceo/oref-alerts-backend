@@ -7,6 +7,9 @@ const { uploadBuffer } = require('./cloudinary');
 const app = express();
 app.use(express.json());
 
+// Health check
+app.get('/health', (_req, res) => res.json({ ok: true }));
+
 // Serve admin UI
 app.get('/admin', (_req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
 

@@ -39,28 +39,32 @@ async function init() {
     console.log('DB: table empty — seeding default sounds via Cloudinary...');
     const uploadsDir = path.join(__dirname, 'uploads');
 
-    for (const s of SEED_SOUNDS) {
-      let imageUrl = null;
-      let audioUrl = null;
+    try {
+      for (const s of SEED_SOUNDS) {
+        let imageUrl = null;
+        let audioUrl = null;
 
-      const imgPath = path.join(uploadsDir, s.imageFile);
-      const audPath = path.join(uploadsDir, s.audioFile);
+        const imgPath = path.join(uploadsDir, s.imageFile);
+        const audPath = path.join(uploadsDir, s.audioFile);
 
-      if (fs.existsSync(imgPath)) {
-        imageUrl = await uploadFile(imgPath, 'oref-sounds', 'image');
-        console.log(`  ${s.id} image → ${imageUrl}`);
+        if (fs.existsSync(imgPath)) {
+          imageUrl = await uploadFile(imgPath, 'oref-sounds', 'image');
+          console.log(`  ${s.id} image → ${imageUrl}`);
+        }
+        if (fs.existsSync(audPath)) {
+          audioUrl = await uploadFile(audPath, 'oref-sounds', 'video');
+          console.log(`  ${s.id} audio → ${audioUrl}`);
+        }
+
+        await pool.query(
+          'INSERT INTO sounds (id, title, category, image_path, audio_path) VALUES ($1, $2, $3, $4, $5)',
+          [s.id, s.title, s.category, imageUrl, audioUrl]
+        );
       }
-      if (fs.existsSync(audPath)) {
-        audioUrl = await uploadFile(audPath, 'oref-sounds', 'video');
-        console.log(`  ${s.id} audio → ${audioUrl}`);
-      }
-
-      await pool.query(
-        'INSERT INTO sounds (id, title, category, image_path, audio_path) VALUES ($1, $2, $3, $4, $5)',
-        [s.id, s.title, s.category, imageUrl, audioUrl]
-      );
+      console.log(`DB: seeded ${SEED_SOUNDS.length} sounds`);
+    } catch (err) {
+      console.error('DB: seed failed (server will continue):', err.message);
     }
-    console.log(`DB: seeded ${SEED_SOUNDS.length} sounds`);
   } else {
     console.log(`DB: ${n} sounds already in table`);
   }

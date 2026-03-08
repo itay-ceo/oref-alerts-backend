@@ -1,10 +1,17 @@
 const cloudinary = require('cloudinary').v2;
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
+let configured = false;
+function ensureConfig() {
+  if (!configured) {
+    const cloud_name = process.env.CLOUDINARY_CLOUD_NAME;
+    const api_key = process.env.CLOUDINARY_API_KEY;
+    const api_secret = process.env.CLOUDINARY_API_SECRET;
+    console.log('[cloudinary] config:', { cloud_name, api_key: api_key ? api_key.slice(0, 4) + '...' : 'MISSING', api_secret: api_secret ? '***set***' : 'MISSING' });
+    if (!api_key) console.error('[cloudinary] WARNING: CLOUDINARY_API_KEY is not set!');
+    cloudinary.config({ cloud_name, api_key, api_secret });
+    configured = true;
+  }
+}
 
 /**
  * Upload a file buffer to Cloudinary.
@@ -14,6 +21,7 @@ cloudinary.config({
  * @returns {Promise<string>} secure URL
  */
 async function uploadBuffer(buffer, folder, resourceType = 'auto', timeoutMs = 60000) {
+  ensureConfig();
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`Cloudinary upload timed out after ${timeoutMs}ms`)), timeoutMs);
     const stream = cloudinary.uploader.upload_stream(
@@ -36,6 +44,7 @@ async function uploadBuffer(buffer, folder, resourceType = 'auto', timeoutMs = 6
  * @returns {Promise<string>} secure URL
  */
 async function uploadFile(filePath, folder, resourceType = 'auto') {
+  ensureConfig();
   const result = await cloudinary.uploader.upload(filePath, {
     folder,
     resource_type: resourceType,

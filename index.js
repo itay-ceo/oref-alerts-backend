@@ -1,7 +1,7 @@
 const express = require('express');
 const path = require('path');
 const multer = require('multer');
-const db = require('./db');
+const { pool, init: initDb } = require('./db');
 
 const app = express();
 app.use(express.json());
@@ -94,7 +94,6 @@ async function pollOref() {
     // Empty response = no active alerts
     if (!text || text.trim() === '') {
       if (wasActive) {
-        // Transition from active → empty = all clear
         console.log('[all_clear] Alerts ended — sending all clear notification');
         wasActive = false;
         lastAlertId = null;
@@ -121,7 +120,6 @@ async function pollOref() {
 
     console.log('[poll] Raw alert:', JSON.stringify(alert));
 
-    // Deduplicate by alert id
     const alertId = alert.id || JSON.stringify(alert);
     if (alertId === lastAlertId) return;
     lastAlertId = alertId;
@@ -136,7 +134,6 @@ async function pollOref() {
     console.log(`[${alertType}] ${title} → ${body} (${areas.length} areas)`);
     await sendPushToAll({ title, body, alertType });
   } catch (err) {
-    // Oref returns empty/invalid responses when there are no alerts — this is normal
     if (err instanceof SyntaxError) return;
     console.error('Poll error:', err.message);
   }
@@ -203,15 +200,15 @@ async function sendPushToAll({ title, body, alertType }) {
 }
 
 // ─── Admin CRUD: sounds ──────────────────────────────────────────────
-app.get('/admin/sounds', (req, res) => {
+app.get('/admin/sounds', async (req, res) => {
   const { category } = req.query;
-  const rows = category
-    ? db.prepare('SELECT * FROM sounds WHERE category = ? ORDER BY category, created_at DESC').all(category)
-    : db.prepare('SELECT * FROM sounds ORDER BY category, created_at DESC').all();
+  const { rows } = category
+    ? await pool.query('SELECT * FROM sounds WHERE category = $1 ORDER BY category, created_at DESC', [category])
+    : await pool.query('SELECT * FROM sounds ORDER BY category, created_at DESC');
   res.json(rows);
 });
 
-app.post('/admin/sounds', upload.fields([{ name: 'image', maxCount: 1 }, { name: 'audio', maxCount: 1 }]), (req, res) => {
+app.post('/admin/sounds', upload.fields([{ name: 'image', maxCount: 1 }, { name: 'audio', maxCount: 1 }]), async (req, res) => {
   const { title, category } = req.body;
   if (!title || !category) return res.status(400).json({ error: 'title and category are required' });
 
@@ -219,13 +216,12 @@ app.post('/admin/sounds', upload.fields([{ name: 'image', maxCount: 1 }, { name:
   const imagePath = req.files?.image?.[0]?.filename || null;
   const audioPath = req.files?.audio?.[0]?.filename || null;
 
-  db.prepare(
-    'INSERT INTO sounds (id, title, category, image_path, audio_path) VALUES (?, ?, ?, ?, ?)'
-  ).run(id, title, category, imagePath, audioPath);
-
-  const sound = db.prepare('SELECT * FROM sounds WHERE id = ?').get(id);
+  const { rows } = await pool.query(
+    'INSERT INTO sounds (id, title, category, image_path, audio_path) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+    [id, title, category, imagePath, audioPath]
+  );
   console.log(`[admin] Added sound: "${title}" (${category})`);
-  res.json(sound);
+  res.json(rows[0]);
 });
 
 const uploadFields = upload.fields([{ name: 'image', maxCount: 1 }, { name: 'audio', maxCount: 1 }]);
@@ -234,42 +230,43 @@ const maybeUpload = (req, res, next) => {
   next();
 };
 
-app.put('/admin/sounds/:id', maybeUpload, (req, res) => {
+app.put('/admin/sounds/:id', maybeUpload, async (req, res) => {
   const { id } = req.params;
-  const existing = db.prepare('SELECT * FROM sounds WHERE id = ?').get(id);
-  if (!existing) return res.status(404).json({ error: 'sound not found' });
+  const { rows: existing } = await pool.query('SELECT * FROM sounds WHERE id = $1', [id]);
+  if (!existing[0]) return res.status(404).json({ error: 'sound not found' });
 
-  const title = req.body.title ?? existing.title;
-  const category = req.body.category ?? existing.category;
-  const isActive = req.body.is_active !== undefined ? Number(req.body.is_active) : existing.is_active;
-  const imagePath = req.files?.image?.[0]?.filename || existing.image_path;
-  const audioPath = req.files?.audio?.[0]?.filename || existing.audio_path;
+  const old = existing[0];
+  const title = req.body.title ?? old.title;
+  const category = req.body.category ?? old.category;
+  const isActive = req.body.is_active !== undefined ? Boolean(Number(req.body.is_active)) : old.is_active;
+  const imagePath = req.files?.image?.[0]?.filename || old.image_path;
+  const audioPath = req.files?.audio?.[0]?.filename || old.audio_path;
 
-  db.prepare(
-    'UPDATE sounds SET title = ?, category = ?, image_path = ?, audio_path = ?, is_active = ? WHERE id = ?'
-  ).run(title, category, imagePath, audioPath, isActive, id);
-
-  const sound = db.prepare('SELECT * FROM sounds WHERE id = ?').get(id);
+  const { rows } = await pool.query(
+    'UPDATE sounds SET title = $1, category = $2, image_path = $3, audio_path = $4, is_active = $5 WHERE id = $6 RETURNING *',
+    [title, category, imagePath, audioPath, isActive, id]
+  );
   console.log(`[admin] Updated sound #${id}: "${title}"`);
-  res.json(sound);
+  res.json(rows[0]);
 });
 
-app.delete('/admin/sounds/:id', (req, res) => {
+app.delete('/admin/sounds/:id', async (req, res) => {
   const { id } = req.params;
-  const existing = db.prepare('SELECT * FROM sounds WHERE id = ?').get(id);
-  if (!existing) return res.status(404).json({ error: 'sound not found' });
+  const { rows: existing } = await pool.query('SELECT * FROM sounds WHERE id = $1', [id]);
+  if (!existing[0]) return res.status(404).json({ error: 'sound not found' });
 
-  db.prepare('DELETE FROM sounds WHERE id = ?').run(id);
-  console.log(`[admin] Deleted sound #${id}: "${existing.title}"`);
+  await pool.query('DELETE FROM sounds WHERE id = $1', [id]);
+  console.log(`[admin] Deleted sound #${id}: "${existing[0].title}"`);
   res.json({ success: true });
 });
 
 // ─── Public API: sounds by category (for the app) ───────────────────
-app.get('/sounds/:category', (req, res) => {
+app.get('/sounds/:category', async (req, res) => {
   const { category } = req.params;
-  const rows = db.prepare(
-    'SELECT id, title, category, image_path, audio_path FROM sounds WHERE category = ? AND is_active = 1 ORDER BY created_at DESC'
-  ).all(category);
+  const { rows } = await pool.query(
+    'SELECT id, title, category, image_path, audio_path FROM sounds WHERE category = $1 AND is_active = true ORDER BY created_at DESC',
+    [category]
+  );
 
   const baseUrl = `${req.protocol}://${req.get('host')}`;
   const sounds = rows.map((r) => ({
@@ -282,9 +279,12 @@ app.get('/sounds/:category', (req, res) => {
 });
 
 // ─── Start ───────────────────────────────────────────────────────────
-app.listen(PORT, async () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  await testOrefConnection();
-  console.log('Polling oref every 3s...');
-  setInterval(pollOref, POLL_INTERVAL_MS);
-});
+(async () => {
+  await initDb();
+  app.listen(PORT, async () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+    await testOrefConnection();
+    console.log('Polling oref every 3s...');
+    setInterval(pollOref, POLL_INTERVAL_MS);
+  });
+})();

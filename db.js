@@ -1,21 +1,23 @@
-const Database = require('better-sqlite3');
-const path = require('path');
+const { Pool } = require('pg');
 
-const db = new Database(path.join(__dirname, 'sounds.db'));
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL?.includes('localhost') ? false : { rejectUnauthorized: false },
+});
 
-// Enable WAL mode for better concurrent read performance
-db.pragma('journal_mode = WAL');
+async function init() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sounds (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      category TEXT NOT NULL CHECK(category IN ('warning', 'active', 'all_clear')),
+      image_path TEXT,
+      audio_path TEXT,
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  console.log('DB: sounds table ready');
+}
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS sounds (
-    id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    category TEXT NOT NULL CHECK(category IN ('warning', 'active', 'all_clear')),
-    image_path TEXT,
-    audio_path TEXT,
-    is_active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  )
-`);
-
-module.exports = db;
+module.exports = { pool, init };

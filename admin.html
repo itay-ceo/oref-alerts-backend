@@ -277,11 +277,11 @@ function render() {
         : '—'}</td>
       <td>
         <button class="toggle ${s.is_active ? 'on' : 'off'}"
-                onclick="toggleActive(${s.id}, ${s.is_active})"></button>
+                onclick="toggleActive('${s.id}', ${s.is_active})"></button>
       </td>
       <td>
-        <button class="action-btn" onclick="openEdit(${s.id})">ערוך</button>
-        <button class="action-btn delete" onclick="deleteSnd(${s.id})">מחק</button>
+        <button class="action-btn" onclick="openEdit('${s.id}')">ערוך</button>
+        <button class="action-btn delete" onclick="deleteSnd('${s.id}')">מחק</button>
       </td>
     </tr>
   `).join('');

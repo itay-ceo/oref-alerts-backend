@@ -372,39 +372,37 @@ document.getElementById('overlay').addEventListener('click', e => {
 
 // ─── Save ───────────────────────────────────────────────────────────
 async function saveSound() {
-  console.log('save clicked');
+  console.log('saveSound() called');
   // Cancel any pending loads so the POST isn't blocked
-  if (loadController) loadController.abort();
+  if (loadController) { loadController.abort(); loadController = null; }
+  isLoading = false;
 
   const editId = document.getElementById('editId').value;
   const title = document.getElementById('fTitle').value.trim();
+  const category = document.getElementById('fCategory').value;
   if (!title) { alert('יש להזין שם צליל'); return; }
 
   const fd = new FormData();
   fd.append('title', title);
-  fd.append('category', document.getElementById('fCategory').value);
+  fd.append('category', category);
 
   const imgFile = document.getElementById('fImage').files[0];
   const audFile = document.getElementById('fAudio').files[0];
   if (imgFile) fd.append('image', imgFile);
   if (audFile) fd.append('audio', audFile);
 
-  const url = editId ? `${API}/${editId}` : API;
+  const url = editId ? '/admin/sounds/' + editId : '/admin/sounds';
   const method = editId ? 'PUT' : 'POST';
 
-  console.log('Saving to', method, url);
+  console.log('Fetching:', method, url, 'title:', title, 'category:', category);
   try {
-    const res = await fetch(url, { method, body: fd });
-    console.log('Save response:', res.status);
+    const res = await fetch(url, { method: method, body: fd });
+    const json = await res.json();
+    console.log('Save response:', res.status, json);
     closeModal();
-    await loadSounds();
-  } catch (err) { console.error('Save failed:', err); }
+    loadSounds();
+  } catch (err) { console.error('Save failed:', err); alert('שגיאה בשמירה: ' + err.message); }
 }
-
-document.getElementById('soundForm').addEventListener('submit', e => {
-  e.preventDefault();
-  saveSound();
-});
 
 // ─── Init ───────────────────────────────────────────────────────────
 loadSounds();

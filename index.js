@@ -288,11 +288,22 @@ app.get('/sounds/:category', async (req, res) => {
 });
 
 // ─── Start ───────────────────────────────────────────────────────────
+process.on('uncaughtException', (err) => console.error('UNCAUGHT:', err));
+process.on('unhandledRejection', (err) => console.error('UNHANDLED:', err));
+
 (async () => {
-  await initDb();
+  try {
+    await initDb();
+  } catch (err) {
+    console.error('DB init failed (continuing):', err.message);
+  }
   app.listen(PORT, async () => {
     console.log(`Server running on http://localhost:${PORT}`);
-    await testOrefConnection();
+    try {
+      await testOrefConnection();
+    } catch (err) {
+      console.error('Oref test failed:', err.message);
+    }
     console.log('Polling oref every 3s...');
     setInterval(pollOref, POLL_INTERVAL_MS);
   });

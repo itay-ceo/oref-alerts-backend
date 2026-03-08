@@ -243,14 +243,26 @@ const API = '/admin/sounds';
 let sounds = [];
 let filterCat = 'all';
 let currentAudio = null;
+let loadController = null;
+let isLoading = false;
 
 const CATEGORY_LABELS = { warning: 'התראה מוקדמת', active: 'אזעקה', all_clear: 'סיום אירוע' };
 
 // ─── Fetch & Render ─────────────────────────────────────────────────
 async function loadSounds() {
-  const res = await fetch(API);
-  sounds = await res.json();
-  render();
+  // Cancel any in-flight request
+  if (loadController) loadController.abort();
+  loadController = new AbortController();
+  isLoading = true;
+  try {
+    const res = await fetch(API, { signal: loadController.signal });
+    sounds = await res.json();
+    render();
+  } catch (err) {
+    if (err.name !== 'AbortError') console.error('Load failed:', err);
+  } finally {
+    isLoading = false;
+  }
 }
 
 function render() {
@@ -313,12 +325,15 @@ function playAudio(url, el) {
 
 // ─── Toggle active ──────────────────────────────────────────────────
 async function toggleActive(id, current) {
-  await fetch(`${API}/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ is_active: current ? 0 : 1 }),
-  });
-  await loadSounds();
+  if (isLoading) return;
+  try {
+    await fetch(`${API}/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_active: current ? 0 : 1 }),
+    });
+    await loadSounds();
+  } catch (err) { console.error('Toggle failed:', err); }
 }
 
 // ─── Delete ─────────────────────────────────────────────────────────
@@ -358,6 +373,9 @@ document.getElementById('overlay').addEventListener('click', e => {
 // ─── Save ───────────────────────────────────────────────────────────
 document.getElementById('soundForm').addEventListener('submit', async e => {
   e.preventDefault();
+  // Cancel any pending loads so the POST isn't blocked
+  if (loadController) loadController.abort();
+
   const editId = document.getElementById('editId').value;
   const fd = new FormData();
   fd.append('title', document.getElementById('fTitle').value);
@@ -371,9 +389,11 @@ document.getElementById('soundForm').addEventListener('submit', async e => {
   const url = editId ? `${API}/${editId}` : API;
   const method = editId ? 'PUT' : 'POST';
 
-  await fetch(url, { method, body: fd });
-  closeModal();
-  await loadSounds();
+  try {
+    await fetch(url, { method, body: fd });
+    closeModal();
+    await loadSounds();
+  } catch (err) { console.error('Save failed:', err); }
 });
 
 // ─── Init ───────────────────────────────────────────────────────────

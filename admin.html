@@ -231,7 +231,7 @@
         <input type="file" id="fAudio" accept="audio/*">
       </div>
       <div class="modal-actions">
-        <button type="button" class="btn-save" onclick="saveSound()">שמור</button>
+        <button type="button" class="btn-save" id="btnSave" onclick="saveSound()">שמור</button>
         <button type="button" class="btn-cancel" onclick="closeModal()">ביטול</button>
       </div>
     </form>
@@ -382,6 +382,10 @@ async function saveSound() {
   const category = document.getElementById('fCategory').value;
   if (!title) { alert('יש להזין שם צליל'); return; }
 
+  const btn = document.getElementById('btnSave');
+  btn.disabled = true;
+  btn.textContent = '⏳ שומר...';
+
   const fd = new FormData();
   fd.append('title', title);
   fd.append('category', category);
@@ -401,7 +405,13 @@ async function saveSound() {
     console.log('Save response:', res.status, json);
     closeModal();
     loadSounds();
-  } catch (err) { console.error('Save failed:', err); alert('שגיאה בשמירה: ' + err.message); }
+  } catch (err) {
+    console.error('Save failed:', err);
+    alert('שגיאה בשמירה: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'שמור';
+  }
 }
 
 // ─── Init ───────────────────────────────────────────────────────────

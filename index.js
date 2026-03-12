@@ -210,6 +210,7 @@ app.get('/cities', async (_req, res) => {
       headers: {
         'Referer': 'https://www.oref.org.il/',
         'X-Requested-With': 'XMLHttpRequest',
+        'User-Agent': 'Mozilla/5.0',
       },
     });
     if (!response.ok) throw new Error(`Oref API returned ${response.status}`);

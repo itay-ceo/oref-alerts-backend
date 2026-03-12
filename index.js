@@ -18,6 +18,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const PORT = process.env.PORT || 3001;
 const OREF_URL = 'https://www.oref.org.il/WarningMessages/alert/alerts.json';
+const OREF_CITIES_URL = 'https://alerts-history.oref.org.il/Shared/Ajax/GetCitiesMix.aspx?lang=he';
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const POLL_INTERVAL_MS = 3000;
 
@@ -193,6 +194,57 @@ async function sendPushToAll({ title, body, alertType }) {
     console.error('Push send error:', err.message);
   }
 }
+
+// ─── Cities list (cached 24h) ────────────────────────────────────────
+let citiesCache = null;
+let citiesCacheTime = 0;
+const CITIES_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+app.get('/cities', async (_req, res) => {
+  try {
+    if (citiesCache && Date.now() - citiesCacheTime < CITIES_CACHE_TTL) {
+      return res.json(citiesCache);
+    }
+
+    const response = await fetch(OREF_CITIES_URL, {
+      headers: {
+        'Referer': 'https://www.oref.org.il/',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+    });
+    if (!response.ok) throw new Error(`Oref API returned ${response.status}`);
+
+    const raw = await response.json();
+
+    // Extract zone name from mixname HTML: "city | <span>zone</span>"
+    const cities = raw.map((item, index) => {
+      let zone = '';
+      const match = item.mixname?.match(/<span>(.*?)<\/span>/);
+      if (match) zone = match[1];
+
+      return {
+        id: parseInt(item.id, 10) || index,
+        name: item.label_he || item.label,
+        name_en: item.label,
+        zone,
+        zone_en: '',
+        countdown: item.migun_time || 0,
+        lat: 0,
+        lng: 0,
+        value: item.label_he || item.label,
+      };
+    });
+
+    citiesCache = cities;
+    citiesCacheTime = Date.now();
+    console.log(`[cities] Fetched ${cities.length} cities from Oref`);
+    res.json(cities);
+  } catch (err) {
+    console.error('[cities] Error:', err.message);
+    if (citiesCache) return res.json(citiesCache); // serve stale cache on error
+    res.status(502).json({ error: 'Failed to fetch cities from Oref' });
+  }
+});
 
 // ─── Admin CRUD: sounds ──────────────────────────────────────────────
 app.get('/admin/sounds', async (req, res) => {

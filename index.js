@@ -3,6 +3,7 @@ const path = require('path');
 const multer = require('multer');
 const { pool, init: initDb } = require('./db');
 const { uploadBuffer } = require('./cloudinary');
+const CITIES_DATA = require('./cities-data');
 
 const app = express();
 app.use(express.json());
@@ -18,7 +19,6 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const PORT = process.env.PORT || 3001;
 const OREF_URL = 'https://www.oref.org.il/WarningMessages/alert/alerts.json';
-const OREF_CITIES_URL = 'https://www.oref.org.il/Shared/Ajax/GetCitiesMix.aspx?lang=he';
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const POLL_INTERVAL_MS = 3000;
 
@@ -195,75 +195,9 @@ async function sendPushToAll({ title, body, alertType }) {
   }
 }
 
-// ─── Cities list (cached 24h) ────────────────────────────────────────
-let citiesCache = null;
-let citiesCacheTime = 0;
-const CITIES_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
-
-const OREF_CITIES_URLS = [
-  'https://www.oref.org.il/Shared/Ajax/GetCitiesMix.aspx?lang=he',
-  'https://alerts-history.oref.org.il/Shared/Ajax/GetCitiesMix.aspx?lang=he',
-];
-
-app.get('/cities', async (_req, res) => {
-  try {
-    if (citiesCache && Date.now() - citiesCacheTime < CITIES_CACHE_TTL) {
-      console.log(`[cities] Serving from cache (${citiesCache.length} cities)`);
-      return res.json(citiesCache);
-    }
-
-    let raw = null;
-    for (const url of OREF_CITIES_URLS) {
-      console.log(`[cities] Trying: ${url}`);
-      try {
-        const response = await fetch(url, {
-          headers: {
-            'Referer': 'https://www.oref.org.il/',
-            'X-Requested-With': 'XMLHttpRequest',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          },
-        });
-        const body = await response.text();
-        console.log(`[cities] ${url} → HTTP ${response.status}, body length: ${body.length}, preview: ${body.substring(0, 200)}`);
-        if (!response.ok) continue;
-        raw = JSON.parse(body);
-        console.log(`[cities] Success from ${url} — got ${raw.length} items`);
-        break;
-      } catch (urlErr) {
-        console.error(`[cities] ${url} failed:`, urlErr.message);
-      }
-    }
-
-    if (!raw) throw new Error('All Oref cities URLs failed');
-
-    // Extract zone name from mixname HTML: "city | <span>zone</span>"
-    const cities = raw.map((item, index) => {
-      let zone = '';
-      const match = item.mixname?.match(/<span>(.*?)<\/span>/);
-      if (match) zone = match[1];
-
-      return {
-        id: parseInt(item.id, 10) || index,
-        name: item.label_he || item.label,
-        name_en: item.label,
-        zone,
-        zone_en: '',
-        countdown: item.migun_time || 0,
-        lat: 0,
-        lng: 0,
-        value: item.label_he || item.label,
-      };
-    });
-
-    citiesCache = cities;
-    citiesCacheTime = Date.now();
-    console.log(`[cities] Cached ${cities.length} cities`);
-    res.json(cities);
-  } catch (err) {
-    console.error('[cities] Error:', err.message, err.stack);
-    if (citiesCache) return res.json(citiesCache);
-    res.status(502).json({ error: 'Failed to fetch cities from Oref', details: err.message });
-  }
+// ─── Cities list (static, sourced from Oref GetCitiesMix) ───────────
+app.get('/cities', (_req, res) => {
+  res.json(CITIES_DATA);
 });
 
 // ─── Admin CRUD: sounds ──────────────────────────────────────────────

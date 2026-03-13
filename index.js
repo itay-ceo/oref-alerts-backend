@@ -38,9 +38,15 @@ app.post('/register', (req, res) => {
 
 // ─── Test alert endpoint ─────────────────────────────────────────────
 const ALERT_TITLES = {
-  active: 'פיקוד העורף 🚨',
+  active: '🚨 אזעקה',
   warning: 'התראה מוקדמת ⚠️',
-  all_clear: 'סיום אירוע ✅',
+  all_clear: '✅ סיום אירוע',
+};
+
+const ALERT_BODIES = {
+  active: 'אזעקה אחים שלי, שיעבור מהר אמןןןן',
+  warning: 'יש מצב שעוד מעט יהיו אזעקות, רק שפרו לכיוון מרחב מוגן (:',
+  all_clear: 'אפשר לצאת, זהו, נגמר האירוע הכל סבבה.',
 };
 
 app.post('/test-alert', async (req, res) => {
@@ -94,7 +100,7 @@ async function pollOref() {
         wasActive = false;
         lastAlertId = null;
         const title = ALERT_TITLES.all_clear;
-        await sendPushToAll({ title, body: 'האיום הוסר, ניתן לחזור לשגרה', alertType: 'all_clear' });
+        await sendPushToAll({ title, body: ALERT_BODIES.all_clear, alertType: 'all_clear' });
       }
       return;
     }
@@ -106,7 +112,7 @@ async function pollOref() {
         wasActive = false;
         lastAlertId = null;
         const title = ALERT_TITLES.all_clear;
-        await sendPushToAll({ title, body: 'האיום הוסר, ניתן לחזור לשגרה', alertType: 'all_clear' });
+        await sendPushToAll({ title, body: ALERT_BODIES.all_clear, alertType: 'all_clear' });
       }
       return;
     }
@@ -125,7 +131,7 @@ async function pollOref() {
 
     const title = ALERT_TITLES[alertType] || alert.title || 'התרעה';
     const areas = alert.data || [];
-    const body = areas.join(', ');
+    const body = ALERT_BODIES[alertType] || areas.join(', ');
 
     console.log(`[${alertType}] ${title} → ${body} (${areas.length} areas)`);
     await sendPushToAll({ title, body, alertType });

@@ -278,25 +278,36 @@ function render() {
   empty.style.display = 'none';
 
   tbody.innerHTML = filtered.map(s => `
-    <tr>
+    <tr data-id="${esc(s.id)}">
       <td>${s.image_path
         ? `<img class="thumb" src="${s.image_path}" alt="">`
         : '<div class="thumb"></div>'}</td>
       <td>${esc(s.title)}</td>
       <td><span class="badge badge-${s.category}">${CATEGORY_LABELS[s.category]}</span></td>
       <td>${s.audio_path
-        ? `<span class="audio-preview" onclick="playAudio('${s.audio_path}', this)">&#9654;</span>`
+        ? `<span class="audio-preview" data-audio="${s.audio_path}">&#9654;</span>`
         : '—'}</td>
       <td>
-        <button class="toggle ${s.is_active ? 'on' : 'off'}"
-                onclick="toggleActive('${s.id}', ${s.is_active})"></button>
+        <button class="toggle ${s.is_active ? 'on' : 'off'}" data-action="toggle" data-active="${s.is_active}"></button>
       </td>
       <td>
-        <button class="action-btn" onclick="openEdit('${s.id}')">ערוך</button>
-        <button class="action-btn delete" onclick="deleteSnd('${s.id}')">מחק</button>
+        <button class="action-btn" data-action="edit">ערוך</button>
+        <button class="action-btn delete" data-action="delete">מחק</button>
       </td>
     </tr>
   `).join('');
+
+  // Event delegation — read the ID from the closest <tr> at click time
+  tbody.onclick = function(e) {
+    const tr = e.target.closest('tr[data-id]');
+    if (!tr) return;
+    const id = tr.dataset.id;
+    const action = e.target.dataset.action;
+    if (action === 'edit') openEdit(id);
+    else if (action === 'delete') deleteSnd(id);
+    else if (action === 'toggle') toggleActive(id, e.target.dataset.active === 'true');
+    else if (e.target.dataset.audio) playAudio(e.target.dataset.audio, e.target);
+  };
 }
 
 function esc(s) {
@@ -352,9 +363,10 @@ function openModal() {
 }
 
 function openEdit(id) {
-  const s = sounds.find(x => x.id === id);
-  if (!s) return;
-  document.getElementById('editId').value = id;
+  const s = sounds.find(x => String(x.id) === String(id));
+  if (!s) { console.warn('openEdit: sound not found for id', id); return; }
+  document.getElementById('soundForm').reset();
+  document.getElementById('editId').value = s.id;
   document.getElementById('modalTitle').textContent = 'ערוך צליל';
   document.getElementById('fTitle').value = s.title;
   document.getElementById('fCategory').value = s.category;

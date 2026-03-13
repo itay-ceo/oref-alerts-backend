@@ -14,6 +14,9 @@ app.get('/health', (_req, res) => res.json({ ok: true }));
 // Serve admin UI
 app.get('/admin', (_req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
 
+// Privacy policy
+app.get('/privacy', (_req, res) => res.sendFile(path.join(__dirname, 'privacy.html')));
+
 // ─── Multer setup (memory storage → Cloudinary) ─────────────────────
 const upload = multer({ storage: multer.memoryStorage() });
 

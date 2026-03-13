@@ -247,6 +247,8 @@ async function sendPushToAll({ title, body, alertType }) {
   const messages = [...pushTokens].map((token) => {
     const device = deviceSounds[token];
     const sound = (device && soundColumn && device[soundColumn]) || 'default';
+    const shortToken = token.length > 20 ? `${token.slice(0, 10)}...${token.slice(-6)}` : token;
+    console.log(`  Sending to ${shortToken} with sound: ${sound}`);
     return {
       to: token,
       sound,

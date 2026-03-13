@@ -33,6 +33,17 @@ async function init() {
   `);
   console.log('DB: sounds table ready');
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS devices (
+      token TEXT PRIMARY KEY,
+      warning_sound TEXT,
+      active_sound TEXT,
+      all_clear_sound TEXT,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  console.log('DB: devices table ready');
+
   // Auto-seed if empty
   const { rows: [{ n }] } = await pool.query('SELECT COUNT(*) AS n FROM sounds');
   if (Number(n) === 0) {

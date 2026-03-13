@@ -28,12 +28,55 @@ let lastAlertId = null;
 let wasActive = false; // tracks if previous poll had an active alert
 
 // ─── Register push token ─────────────────────────────────────────────
-app.post('/register', (req, res) => {
-  const { token } = req.body;
+app.post('/register', async (req, res) => {
+  const { token, sounds } = req.body;
   if (!token) return res.status(400).json({ error: 'token is required' });
   pushTokens.add(token);
+
+  try {
+    const warningSound = sounds?.warning?.id ? `${sounds.warning.id}.caf` : null;
+    const activeSound = sounds?.active?.id ? `${sounds.active.id}.caf` : null;
+    const allClearSound = sounds?.allClear?.id ? `${sounds.allClear.id}.caf` : null;
+
+    await pool.query(
+      `INSERT INTO devices (token, warning_sound, active_sound, all_clear_sound, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (token) DO UPDATE SET
+         warning_sound = COALESCE($2, devices.warning_sound),
+         active_sound = COALESCE($3, devices.active_sound),
+         all_clear_sound = COALESCE($4, devices.all_clear_sound),
+         updated_at = NOW()`,
+      [token, warningSound, activeSound, allClearSound]
+    );
+  } catch (err) {
+    console.error('Failed to upsert device:', err.message);
+  }
+
   console.log(`Registered token (${pushTokens.size} total)`);
   res.json({ success: true });
+});
+
+// ─── Update sound preference for a device ────────────────────────────
+app.post('/update-sounds', async (req, res) => {
+  const { token, alertType, soundId } = req.body;
+  if (!token || !alertType) return res.status(400).json({ error: 'token and alertType are required' });
+
+  const columnMap = { warning: 'warning_sound', active: 'active_sound', allClear: 'all_clear_sound' };
+  const column = columnMap[alertType];
+  if (!column) return res.status(400).json({ error: 'invalid alertType' });
+
+  const filename = soundId ? `${soundId}.caf` : null;
+  try {
+    await pool.query(
+      `UPDATE devices SET ${column} = $1, updated_at = NOW() WHERE token = $2`,
+      [filename, token]
+    );
+    console.log(`Updated ${alertType} sound for device: ${filename}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Failed to update sound:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Test alert endpoint ─────────────────────────────────────────────
@@ -55,6 +98,14 @@ app.post('/test-alert', async (req, res) => {
   const body = areas.join(', ');
   console.log(`Test alert: ${title} → ${body}`);
   await sendPushToAll({ title, body, alertType });
+  res.json({ success: true, tokenCount: pushTokens.size });
+});
+
+app.get('/test-alert', async (_req, res) => {
+  const title = ALERT_TITLES.active;
+  const body = ALERT_BODIES.active;
+  console.log(`Test alert (GET): ${title} → ${body}`);
+  await sendPushToAll({ title, body, alertType: 'active' });
   res.json({ success: true, tokenCount: pushTokens.size });
 });
 
@@ -173,20 +224,38 @@ async function testOrefConnection() {
 }
 
 // ─── Send push notifications ─────────────────────────────────────────
+const ALERT_TYPE_COLUMN = { warning: 'warning_sound', active: 'active_sound', all_clear: 'all_clear_sound' };
+
 async function sendPushToAll({ title, body, alertType }) {
   if (pushTokens.size === 0) {
     console.log('No registered tokens, skipping push');
     return;
   }
 
-  const messages = [...pushTokens].map((token) => ({
-    to: token,
-    sound: 'default',
-    title,
-    body,
-    data: { alertType },
-    priority: 'high',
-  }));
+  // Load per-device sound preferences from DB
+  let deviceSounds = {};
+  try {
+    const { rows } = await pool.query('SELECT token, warning_sound, active_sound, all_clear_sound FROM devices');
+    for (const row of rows) {
+      deviceSounds[row.token] = row;
+    }
+  } catch (err) {
+    console.error('Failed to load device sounds:', err.message);
+  }
+
+  const soundColumn = ALERT_TYPE_COLUMN[alertType];
+  const messages = [...pushTokens].map((token) => {
+    const device = deviceSounds[token];
+    const sound = (device && soundColumn && device[soundColumn]) || 'default';
+    return {
+      to: token,
+      sound,
+      title,
+      body,
+      data: { alertType },
+      priority: 'high',
+    };
+  });
 
   try {
     const response = await fetch(EXPO_PUSH_URL, {
@@ -317,6 +386,10 @@ process.on('unhandledRejection', (err) => console.error('UNHANDLED:', err));
 (async () => {
   try {
     await initDb();
+    // Load existing push tokens from DB
+    const { rows } = await pool.query('SELECT token FROM devices');
+    for (const row of rows) pushTokens.add(row.token);
+    if (rows.length > 0) console.log(`Loaded ${rows.length} push token(s) from DB`);
   } catch (err) {
     console.error('DB init failed (continuing):', err.message);
   }

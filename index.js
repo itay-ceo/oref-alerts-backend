@@ -188,6 +188,17 @@ async function pollOref() {
     const body = ALERT_BODIES[alertType] || areas.join(', ');
 
     console.log(`[${alertType}] ${title} → ${body} (${areas.length} areas)`);
+
+    // Log alert to DB for stats
+    try {
+      await pool.query(
+        'INSERT INTO alerts_log (alert_type, areas) VALUES ($1, $2)',
+        [alertType, areas]
+      );
+    } catch (logErr) {
+      console.error('[alerts_log] Failed to log alert:', logErr.message);
+    }
+
     await sendPushToAll({ title, body, alertType });
   } catch (err) {
     if (err instanceof SyntaxError) return;
@@ -382,6 +393,155 @@ app.get('/sounds/:category', async (req, res) => {
     audio: r.audio_path || null,
   }));
   res.json(sounds);
+});
+
+// ─── Feature flags ───────────────────────────────────────────────
+app.get('/features', (_req, res) => {
+  const features = {
+    userSounds: process.env.FEATURE_USER_SOUNDS !== 'false',
+    funStats: process.env.FEATURE_FUN_STATS !== 'false',
+  };
+  console.log('[features] Returning feature flags:', features);
+  res.json(features);
+});
+
+// ─── User sound upload ──────────────────────────────────────────
+app.post('/user-sounds', upload.fields([{ name: 'audio', maxCount: 1 }]), async (req, res) => {
+  console.log('[user-sounds] POST /user-sounds — body:', req.body, 'files:', Object.keys(req.files || {}));
+  try {
+    const { title, pushToken } = req.body;
+    if (!title || !pushToken) {
+      console.log('[user-sounds] Missing title or pushToken');
+      return res.status(400).json({ error: 'title and pushToken are required' });
+    }
+
+    const id = `user_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    let audioUrl = null;
+
+    if (req.files?.audio?.[0]) {
+      console.log('[user-sounds] Uploading audio to Cloudinary...', req.files.audio[0].size, 'bytes');
+      audioUrl = await uploadBuffer(req.files.audio[0].buffer, 'oref-user-sounds', 'video');
+      console.log('[user-sounds] Audio uploaded:', audioUrl);
+    } else {
+      console.log('[user-sounds] No audio file provided');
+      return res.status(400).json({ error: 'audio file is required' });
+    }
+
+    await pool.query(
+      'INSERT INTO user_sounds (id, push_token, title, audio_path) VALUES ($1, $2, $3, $4)',
+      [id, pushToken, title, audioUrl]
+    );
+    console.log(`[user-sounds] Saved user sound "${title}" (${id}) for token ${pushToken.slice(0, 10)}...`);
+
+    res.json({ id, title, audio: audioUrl });
+  } catch (err) {
+    console.error('[user-sounds] Error:', err.stack || err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/user-sounds/:token', async (req, res) => {
+  const { token } = req.params;
+  console.log(`[user-sounds] GET /user-sounds/${token.slice(0, 10)}...`);
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, title, audio_path FROM user_sounds WHERE push_token = $1 ORDER BY created_at DESC',
+      [token]
+    );
+    const sounds = rows.map((r) => ({
+      id: r.id,
+      name: r.title,
+      image: null,
+      audio: r.audio_path,
+      isUserSound: true,
+    }));
+    console.log(`[user-sounds] Found ${sounds.length} sounds for token`);
+    res.json(sounds);
+  } catch (err) {
+    console.error('[user-sounds] Error fetching user sounds:', err.stack || err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/user-sounds/:id', async (req, res) => {
+  const { id } = req.params;
+  const { pushToken } = req.body;
+  console.log(`[user-sounds] DELETE /user-sounds/${id}`);
+  try {
+    await pool.query('DELETE FROM user_sounds WHERE id = $1 AND push_token = $2', [id, pushToken]);
+    console.log(`[user-sounds] Deleted sound ${id}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[user-sounds] Error deleting:', err.stack || err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Fun Stats ──────────────────────────────────────────────────
+app.get('/stats', async (req, res) => {
+  const { token, zones } = req.query;
+  console.log(`[fun-stats] GET /stats — token=${(token || '').slice(0, 10)}..., zones=${zones}`);
+  try {
+    // Get all alerts from log
+    const { rows: allAlerts } = await pool.query(
+      'SELECT alert_type, areas, timestamp FROM alerts_log ORDER BY timestamp DESC'
+    );
+    console.log(`[fun-stats] Total alerts in DB: ${allAlerts.length}`);
+
+    // Parse user zones
+    const userZones = zones ? (Array.isArray(zones) ? zones : zones.split(',')) : [];
+
+    // Filter alerts relevant to user's areas
+    const userAlerts = userZones.length > 0
+      ? allAlerts.filter((a) => a.areas && a.areas.some((area) => userZones.includes(area)))
+      : allAlerts;
+
+    // Count by hour
+    const hourCounts = new Array(24).fill(0);
+    for (const a of userAlerts) {
+      const hour = new Date(a.timestamp).getHours();
+      hourCounts[hour]++;
+    }
+
+    // Safest hour (fewest alerts)
+    const safestHour = hourCounts.indexOf(Math.min(...hourCounts));
+
+    // Total shelter time (assume 10 min per alert)
+    const totalMinutes = userAlerts.filter((a) => a.alert_type === 'active').length * 10;
+    const faudaEpisodes = Math.max(1, Math.round(totalMinutes / 45));
+
+    // Most common alert hour
+    const busiestHour = hourCounts.indexOf(Math.max(...hourCounts));
+
+    // Border area comparison (use areas with most alerts)
+    const areaCounts = {};
+    for (const a of allAlerts) {
+      if (a.areas) {
+        for (const area of a.areas) {
+          areaCounts[area] = (areaCounts[area] || 0) + 1;
+        }
+      }
+    }
+    const sortedAreas = Object.entries(areaCounts).sort((a, b) => b[1] - a[1]);
+    const borderArea = sortedAreas[0] ? { name: sortedAreas[0][0], count: sortedAreas[0][1] } : null;
+
+    const stats = {
+      totalAlerts: allAlerts.length,
+      userAlerts: userAlerts.length,
+      safestHour,
+      totalShelterMinutes: totalMinutes,
+      faudaEpisodes,
+      busiestHour,
+      borderArea,
+      hourCounts,
+    };
+
+    console.log(`[fun-stats] Computed stats: userAlerts=${userAlerts.length}, safestHour=${safestHour}`);
+    res.json(stats);
+  } catch (err) {
+    console.error('[fun-stats] Error:', err.stack || err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Start ───────────────────────────────────────────────────────────

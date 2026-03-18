@@ -44,6 +44,28 @@ async function init() {
   `);
   console.log('DB: devices table ready');
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS alerts_log (
+      id SERIAL PRIMARY KEY,
+      alert_type TEXT NOT NULL,
+      areas TEXT[] NOT NULL DEFAULT '{}',
+      timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  console.log('DB: alerts_log table ready');
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_sounds (
+      id TEXT NOT NULL,
+      push_token TEXT NOT NULL,
+      title TEXT NOT NULL,
+      audio_path TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (id, push_token)
+    )
+  `);
+  console.log('DB: user_sounds table ready');
+
   // Auto-seed if empty
   const { rows: [{ n }] } = await pool.query('SELECT COUNT(*) AS n FROM sounds');
   if (Number(n) === 0) {

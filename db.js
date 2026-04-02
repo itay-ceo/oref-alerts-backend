@@ -60,10 +60,15 @@ async function init() {
       push_token TEXT NOT NULL,
       title TEXT NOT NULL,
       audio_path TEXT,
+      image_path TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY (id, push_token)
     )
   `);
+  // Add image_path column if missing (for existing databases)
+  await pool.query(`
+    ALTER TABLE user_sounds ADD COLUMN IF NOT EXISTS image_path TEXT
+  `).catch(() => {});
   console.log('DB: user_sounds table ready');
 
   // Auto-seed if empty

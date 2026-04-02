@@ -8,6 +8,22 @@ const CITIES_DATA = require('./cities-data');
 const app = express();
 app.use(express.json());
 
+// ─── Extract embedded artwork from MP3 ID3 tags ─────────────────────
+async function extractArtwork(audioBuffer) {
+  try {
+    const mm = await import('music-metadata');
+    const metadata = await mm.parseBuffer(audioBuffer);
+    const picture = metadata.common.picture?.[0];
+    if (picture && picture.data && picture.data.length > 0) {
+      console.log(`[artwork] Found embedded artwork: ${picture.format}, ${picture.data.length} bytes`);
+      return picture.data;
+    }
+  } catch (err) {
+    console.warn('[artwork] Failed to extract artwork:', err.message);
+  }
+  return null;
+}
+
 // Health check
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
@@ -313,15 +329,22 @@ app.post('/admin/sounds', upload.fields([{ name: 'image', maxCount: 1 }, { name:
     let imageUrl = null;
     let audioUrl = null;
 
-    if (req.files?.image?.[0]) {
-      console.log('[POST /admin/sounds] Uploading image to Cloudinary...', req.files.image[0].size, 'bytes');
-      imageUrl = await uploadBuffer(req.files.image[0].buffer, 'oref-sounds', 'image');
-      console.log('[POST /admin/sounds] Image uploaded:', imageUrl);
-    }
     if (req.files?.audio?.[0]) {
       console.log('[POST /admin/sounds] Uploading audio to Cloudinary...', req.files.audio[0].size, 'bytes');
       audioUrl = await uploadBuffer(req.files.audio[0].buffer, 'oref-sounds', 'video');
       console.log('[POST /admin/sounds] Audio uploaded:', audioUrl);
+    }
+    if (req.files?.image?.[0]) {
+      console.log('[POST /admin/sounds] Uploading image to Cloudinary...', req.files.image[0].size, 'bytes');
+      imageUrl = await uploadBuffer(req.files.image[0].buffer, 'oref-sounds', 'image');
+      console.log('[POST /admin/sounds] Image uploaded:', imageUrl);
+    } else if (req.files?.audio?.[0]) {
+      const artwork = await extractArtwork(req.files.audio[0].buffer);
+      if (artwork) {
+        console.log('[POST /admin/sounds] Uploading embedded artwork to Cloudinary...');
+        imageUrl = await uploadBuffer(artwork, 'oref-sounds', 'image');
+        console.log('[POST /admin/sounds] Embedded artwork uploaded:', imageUrl);
+      }
     }
 
     console.log('[POST /admin/sounds] Inserting into DB...');
@@ -356,11 +379,17 @@ app.put('/admin/sounds/:id', maybeUpload, async (req, res) => {
   let imageUrl = old.image_path;
   let audioUrl = old.audio_path;
 
-  if (req.files?.image?.[0]) {
-    imageUrl = await uploadBuffer(req.files.image[0].buffer, 'oref-sounds', 'image');
-  }
   if (req.files?.audio?.[0]) {
     audioUrl = await uploadBuffer(req.files.audio[0].buffer, 'oref-sounds', 'video');
+  }
+  if (req.files?.image?.[0]) {
+    imageUrl = await uploadBuffer(req.files.image[0].buffer, 'oref-sounds', 'image');
+  } else if (req.files?.audio?.[0] && !old.image_path) {
+    const artwork = await extractArtwork(req.files.audio[0].buffer);
+    if (artwork) {
+      imageUrl = await uploadBuffer(artwork, 'oref-sounds', 'image');
+      console.log(`[admin] Extracted embedded artwork for sound #${id}`);
+    }
   }
 
   const { rows } = await pool.query(
@@ -420,23 +449,31 @@ app.post('/user-sounds', upload.fields([{ name: 'audio', maxCount: 1 }]), async 
 
     const id = `user_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     let audioUrl = null;
+    let imageUrl = null;
 
     if (req.files?.audio?.[0]) {
       console.log('[user-sounds] Uploading audio to Cloudinary...', req.files.audio[0].size, 'bytes');
       audioUrl = await uploadBuffer(req.files.audio[0].buffer, 'oref-user-sounds', 'video');
       console.log('[user-sounds] Audio uploaded:', audioUrl);
+
+      const artwork = await extractArtwork(req.files.audio[0].buffer);
+      if (artwork) {
+        console.log('[user-sounds] Uploading embedded artwork to Cloudinary...');
+        imageUrl = await uploadBuffer(artwork, 'oref-user-sounds', 'image');
+        console.log('[user-sounds] Embedded artwork uploaded:', imageUrl);
+      }
     } else {
       console.log('[user-sounds] No audio file provided');
       return res.status(400).json({ error: 'audio file is required' });
     }
 
     await pool.query(
-      'INSERT INTO user_sounds (id, push_token, title, audio_path) VALUES ($1, $2, $3, $4)',
-      [id, pushToken, title, audioUrl]
+      'INSERT INTO user_sounds (id, push_token, title, audio_path, image_path) VALUES ($1, $2, $3, $4, $5)',
+      [id, pushToken, title, audioUrl, imageUrl]
     );
     console.log(`[user-sounds] Saved user sound "${title}" (${id}) for token ${pushToken.slice(0, 10)}...`);
 
-    res.json({ id, title, audio: audioUrl });
+    res.json({ id, title, audio: audioUrl, image: imageUrl });
   } catch (err) {
     console.error('[user-sounds] Error:', err.stack || err.message);
     res.status(500).json({ error: err.message });
@@ -448,13 +485,13 @@ app.get('/user-sounds/:token', async (req, res) => {
   console.log(`[user-sounds] GET /user-sounds/${token.slice(0, 10)}...`);
   try {
     const { rows } = await pool.query(
-      'SELECT id, title, audio_path FROM user_sounds WHERE push_token = $1 ORDER BY created_at DESC',
+      'SELECT id, title, audio_path, image_path FROM user_sounds WHERE push_token = $1 ORDER BY created_at DESC',
       [token]
     );
     const sounds = rows.map((r) => ({
       id: r.id,
       name: r.title,
-      image: null,
+      image: r.image_path || null,
       audio: r.audio_path,
       isUserSound: true,
     }));

@@ -105,6 +105,9 @@ app.post('/test-alert', async (req, res) => {
 });
 
 app.get('/test-alert', async (_req, res) => {
+  if (process.env.FEATURE_TEST_ALERT !== 'true') {
+    return res.status(404).json({ error: 'not found' });
+  }
   const title = ALERT_TITLES.active;
   const body = ALERT_BODIES.active;
   console.log(`Test alert (GET): ${title} → ${body}`);
@@ -496,6 +499,10 @@ app.get('/stats', async (req, res) => {
       ? allAlerts.filter((a) => a.areas && a.areas.some((area) => userZones.includes(area)))
       : allAlerts;
 
+    // Weekly user alerts (last 7 days)
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const weeklyUserAlerts = userAlerts.filter((a) => new Date(a.timestamp) >= oneWeekAgo).length;
+
     // Count by hour
     const hourCounts = new Array(24).fill(0);
     for (const a of userAlerts) {
@@ -503,40 +510,41 @@ app.get('/stats', async (req, res) => {
       hourCounts[hour]++;
     }
 
-    // Safest hour (fewest alerts)
-    const safestHour = hourCounts.indexOf(Math.min(...hourCounts));
-
-    // Total shelter time (assume 10 min per alert)
-    const totalMinutes = userAlerts.filter((a) => a.alert_type === 'active').length * 10;
-    const faudaEpisodes = Math.max(1, Math.round(totalMinutes / 45));
-
-    // Most common alert hour
+    // Busiest hour
     const busiestHour = hourCounts.indexOf(Math.max(...hourCounts));
 
-    // Border area comparison (use areas with most alerts)
-    const areaCounts = {};
-    for (const a of allAlerts) {
-      if (a.areas) {
-        for (const area of a.areas) {
-          areaCounts[area] = (areaCounts[area] || 0) + 1;
-        }
-      }
+    // Busiest day of week (0=Sunday, 6=Saturday)
+    const dayCounts = new Array(7).fill(0);
+    for (const a of userAlerts) {
+      const day = new Date(a.timestamp).getDay();
+      dayCounts[day]++;
     }
-    const sortedAreas = Object.entries(areaCounts).sort((a, b) => b[1] - a[1]);
-    const borderArea = sortedAreas[0] ? { name: sortedAreas[0][0], count: sortedAreas[0][1] } : null;
+    const busiestDay = dayCounts.indexOf(Math.max(...dayCounts));
+
+    // Average hours between consecutive user alerts
+    let avgHoursBetweenAlerts = null;
+    if (userAlerts.length >= 2) {
+      const sorted = userAlerts
+        .map((a) => new Date(a.timestamp).getTime())
+        .sort((a, b) => a - b);
+      let totalGap = 0;
+      for (let i = 1; i < sorted.length; i++) {
+        totalGap += sorted[i] - sorted[i - 1];
+      }
+      avgHoursBetweenAlerts = Math.round((totalGap / (sorted.length - 1) / (1000 * 60 * 60)) * 10) / 10;
+    }
 
     const stats = {
       totalAlerts: allAlerts.length,
       userAlerts: userAlerts.length,
-      safestHour,
-      totalShelterMinutes: totalMinutes,
-      faudaEpisodes,
+      weeklyUserAlerts,
+      busiestDay,
       busiestHour,
-      borderArea,
+      avgHoursBetweenAlerts,
       hourCounts,
     };
 
-    console.log(`[fun-stats] Computed stats: userAlerts=${userAlerts.length}, safestHour=${safestHour}`);
+    console.log(`[stats] Computed stats: userAlerts=${userAlerts.length}, weeklyUserAlerts=${weeklyUserAlerts}`);
     res.json(stats);
   } catch (err) {
     console.error('[fun-stats] Error:', err.stack || err.message);

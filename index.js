@@ -402,7 +402,7 @@ app.get('/sounds/:category', async (req, res) => {
 app.get('/features', (_req, res) => {
   const features = {
     userSounds: process.env.FEATURE_USER_SOUNDS !== 'false',
-    funStats: process.env.FEATURE_FUN_STATS !== 'false',
+    alertStats: process.env.FEATURE_ALERT_STATS !== 'false',
   };
   console.log('[features] Returning feature flags:', features);
   res.json(features);
@@ -480,16 +480,16 @@ app.delete('/user-sounds/:id', async (req, res) => {
   }
 });
 
-// ─── Fun Stats ──────────────────────────────────────────────────
+// ─── Alert Stats ────────────────────────────────────────────────
 app.get('/stats', async (req, res) => {
   const { token, zones } = req.query;
-  console.log(`[fun-stats] GET /stats — token=${(token || '').slice(0, 10)}..., zones=${zones}`);
+  console.log(`[stats] GET /stats — token=${(token || '').slice(0, 10)}..., zones=${zones}`);
   try {
     // Get all alerts from log
     const { rows: allAlerts } = await pool.query(
       'SELECT alert_type, areas, timestamp FROM alerts_log ORDER BY timestamp DESC'
     );
-    console.log(`[fun-stats] Total alerts in DB: ${allAlerts.length}`);
+    console.log(`[stats] Total alerts in DB: ${allAlerts.length}`);
 
     // Parse user zones
     const userZones = zones ? (Array.isArray(zones) ? zones : zones.split(',')) : [];
@@ -547,7 +547,7 @@ app.get('/stats', async (req, res) => {
     console.log(`[stats] Computed stats: userAlerts=${userAlerts.length}, weeklyUserAlerts=${weeklyUserAlerts}`);
     res.json(stats);
   } catch (err) {
-    console.error('[fun-stats] Error:', err.stack || err.message);
+    console.error('[stats] Error:', err.stack || err.message);
     res.status(500).json({ error: err.message });
   }
 });
